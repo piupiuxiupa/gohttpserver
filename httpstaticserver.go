@@ -60,6 +60,8 @@ type HTTPStaticServer struct {
 	DeepPathMaxDepth int
 	NoIndex          bool
 
+	HTTPAuthFunc func(user, pass string, r *http.Request) bool
+
 	indexes []IndexFileItem
 	m       *mux.Router
 	bufPool sync.Pool // use sync.Pool caching buf to reduce gc ratio
@@ -169,7 +171,23 @@ func (s *HTTPStaticServer) hIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *HTTPStaticServer) requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	if s.AuthType != "http" || s.HTTPAuthFunc == nil {
+		return true
+	}
+	user, pass, ok := r.BasicAuth()
+	if !ok || !s.HTTPAuthFunc(user, pass, r) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
 func (s *HTTPStaticServer) hDelete(w http.ResponseWriter, req *http.Request) {
+	if !s.requireAuth(w, req) {
+		return
+	}
 	path := mux.Vars(req)["path"]
 	realPath := s.getRealPath(req)
 	// path = filepath.Clean(path) // for safe reason, prevent path contain ..
@@ -194,6 +212,9 @@ func (s *HTTPStaticServer) hDelete(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *HTTPStaticServer) hUploadOrMkdir(w http.ResponseWriter, req *http.Request) {
+	if !s.requireAuth(w, req) {
+		return
+	}
 	dirpath := s.getRealPath(req)
 
 	// check auth

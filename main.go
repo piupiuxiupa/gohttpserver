@@ -231,10 +231,25 @@ func main() {
 
 	hdlr = accesslog.NewLoggingHandler(hdlr, logger)
 
-	// HTTP Basic Authentication
+	// HTTP Basic Authentication (only enforced for upload/delete in handlers)
 	switch gcfg.Auth.Type {
 	case "http":
-		hdlr = multiBasicAuth(gcfg.Auth.HTTP)(hdlr)
+		userPassMap := make(map[string]string)
+		for _, auth := range gcfg.Auth.HTTP {
+			userpass := strings.SplitN(auth, ":", 2)
+			if len(userpass) == 2 {
+				userPassMap[userpass[0]] = userpass[1]
+			}
+		}
+		ss.HTTPAuthFunc = func(user, pass string, r *http.Request) bool {
+			password, ok := userPassMap[user]
+			if !ok {
+				return false
+			}
+			givenPass := sha256.Sum256([]byte(pass))
+			requiredPass := sha256.Sum256([]byte(password))
+			return subtle.ConstantTimeCompare(givenPass[:], requiredPass[:]) == 1
+		}
 	case "openid":
 		handleOpenID(gcfg.Auth.OpenID, false) // FIXME(ssx): set secure default to false
 		// case "github":
